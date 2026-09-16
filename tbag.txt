@@ -254,7 +254,7 @@ renk "scrcpy baslatiliyor"
 echo "  Cikmak icin scrcpy penceresini kapatin veya Ctrl+C basin."
 sleep 1
 
-scrcpy -s "$SERIAL" --max-size 1280 --video-bit-rate 2M -f "${CROP_PARAM[@]}"
+scrcpy -s "$SERIAL" --max-size 1280 --video-bit-rate 2M --max-fps 30 -f "${CROP_PARAM[@]}"
 SCRCPY_DURUM=$?
 
 if [ "$SCRCPY_DURUM" -ne 0 ]; then
