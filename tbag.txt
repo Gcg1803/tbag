@@ -260,7 +260,7 @@ scrcpy -s "$SERIAL" --max-size 1280 --video-bit-rate 2M --max-fps 30 -f "${CROP_
 SCRCPY_DURUM=$?
 
 if [ "$SCRCPY_DURUM" -ne 0 ]; then
-    hata "scrcpy beklenmedik sekilde kapandi (kod: $SCRCPY_DURUM)."
+    hata "scrcpy kapatıldı (kod: $SCRCPY_DURUM)."
     exit "$SCRCPY_DURUM"
 fi
 
