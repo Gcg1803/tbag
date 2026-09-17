@@ -76,7 +76,6 @@ ok "adb disconnect calistirildi"
 # 2) BAGLANTI TURU SECIMI
 # ---------------------------------------------------------------
 renk "Baglanti turunu secin"
-echo "test kodu 123"
 echo "  1) Kablosuz (Wi-Fi)"
 echo "  2) Kablolu (USB uzerinden IP ile)"
 BAGLANTI_TURU=""
@@ -93,7 +92,7 @@ done
 # ---------------------------------------------------------------
 renk "Goruntu ekran oranini secin"
 echo "  1) Tabletin kendi ekran oranini koru"
-echo "  2) 16:9'a donustur (akilli tahtaya tam sigmasi icin)"
+echo "  2) Tahtada tam ekran yap (Görüntü biraz kırpılır)"
 ORAN_SECIMI=""
 while true; do
     read -r -p "Seciminiz [1-2]: " ORAN_SECIMI
