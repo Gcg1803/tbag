@@ -76,7 +76,7 @@ ok "adb disconnect calistirildi"
 # 2) BAGLANTI TURU SECIMI
 # ---------------------------------------------------------------
 renk "Baglanti turunu secin"
-echo "test kodu"
+echo "test kodu 123"
 echo "  1) Kablosuz (Wi-Fi)"
 echo "  2) Kablolu (USB uzerinden IP ile)"
 BAGLANTI_TURU=""
