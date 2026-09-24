@@ -1,25 +1,9 @@
 #!/usr/bin/env python3
-# =====================================================================
-#  ANDROID CIHAZ BAGLANTISI
-#  Bu dosyanin tamami her calistirmada GitHub'dan taze indirilir.
-#  Kullaniciya gorunen her metin BASLIK degiskeni ve asagidaki Turkce
-#  metinler uzerinden gelir - "tbag" ismi hicbir yerde gosterilmez.
-# =====================================================================
-
 import subprocess
 import re
 import time
 
 BASLIK = "Android Cihaz Bağlantısı"
-
-# ---------------------------------------------------------------
-# Hangi baglanti modlari aktif? Yeni bir mod eklemek ya da kapatilan
-# bir modu geri getirmek icin sadece burayi ve ilgili fonksiyonu
-# degistirmek yeterli - cihazlara hic dokunmaya gerek yok.
-# ---------------------------------------------------------------
-MOD_KABLOLU = True
-MOD_KABLOSUZ = False   # su an kapali; ileride True yapip fonksiyonu doldurun
-
 TCPIP_PORT = 5555
 MAX_SIZE = "1280"
 VIDEO_BITRATE = "2M"
@@ -27,35 +11,27 @@ MAX_FPS = "30"
 
 
 def adb(*args, timeout=15):
-    """adb komutunu calistirir, (donus_kodu, stdout) dondurur."""
     try:
-        sonuc = subprocess.run(["adb", *args], capture_output=True,
-                                text=True, timeout=timeout)
+        sonuc = subprocess.run(["adb", *args], capture_output=True, text=True, timeout=timeout)
         return sonuc.returncode, sonuc.stdout.strip()
     except Exception:
         return 1, ""
 
 
 def bilgi_goster(mesaj, tur="info"):
-    subprocess.run(["zenity", f"--{tur}", "--title", BASLIK,
-                     "--text", mesaj, "--width", "360"],
-                    capture_output=True)
+    subprocess.run(["zenity", f"--{tur}", "--title", BASLIK, "--text", mesaj, "--width", "360"], capture_output=True)
 
 
 def tek_tik_secim(mesaj, secenek_1, secenek_2):
-    """Iki ozel butonlu, tek tikla karar verilen pencere.
-    Tiklanan secenegin metnini dondurur; kapatilirsa None doner."""
     sonuc = subprocess.run(
         ["zenity", "--question", "--title", BASLIK, "--text", mesaj,
-         "--extra-button", secenek_1, "--extra-button", secenek_2,
-         "--cancel-label=Vazgeç"],
+         "--extra-button", secenek_1, "--extra-button", secenek_2, "--cancel-label=Vazgeç"],
         capture_output=True, text=True)
     secim = sonuc.stdout.strip()
     return secim if secim in (secenek_1, secenek_2) else None
 
 
 def usb_cihaz_bekle(sure_sn=30):
-    """USB uzerinden (ip:port formatinda OLMAYAN) yetkili bir cihaz bekler."""
     for _ in range(sure_sn):
         _, cikti = adb("devices")
         for satir in cikti.splitlines()[1:]:
@@ -67,11 +43,8 @@ def usb_cihaz_bekle(sure_sn=30):
 
 
 def tablet_wifi_ip_al(usb_seri):
-    denemeler = (
-        ["-s", usb_seri, "shell", "ip", "route", "show", "dev", "wlan0"],
-        ["-s", usb_seri, "shell", "ip", "-f", "inet", "addr", "show", "wlan0"],
-    )
-    for komut in denemeler:
+    for komut in (["-s", usb_seri, "shell", "ip", "route", "show", "dev", "wlan0"],
+                  ["-s", usb_seri, "shell", "ip", "-f", "inet", "addr", "show", "wlan0"]):
         _, cikti = adb(*komut)
         eslesme = re.search(r"(?:src|inet) (\d{1,3}(?:\.\d{1,3}){3})", cikti)
         if eslesme:
@@ -92,15 +65,12 @@ def adb_baglanti_dogrula(serial, deneme=5):
 def kablolu_baglan():
     usb_seri = usb_cihaz_bekle()
     if not usb_seri:
-        bilgi_goster("USB üzerinden bir cihaz bulunamadı.\n"
-                      "Kabloyu kontrol edin ve USB hata ayıklamanın açık "
-                      "olduğundan emin olun.", "error")
+        bilgi_goster("USB üzerinden bir cihaz bulunamadı.\nKabloyu kontrol edin ve USB hata ayıklamanın açık olduğundan emin olun.", "error")
         return None
 
     ip = tablet_wifi_ip_al(usb_seri)
     if not ip:
-        bilgi_goster("Tabletin Wi-Fi adresi okunamadı.\n"
-                      "Tabletin Wi-Fi'a bağlı olduğundan emin olun.", "error")
+        bilgi_goster("Tabletin Wi-Fi adresi okunamadı.\nTabletin Wi-Fi'a bağlı olduğundan emin olun.", "error")
         return None
 
     adb("-s", usb_seri, "tcpip", str(TCPIP_PORT))
@@ -115,17 +85,7 @@ def kablolu_baglan():
     return serial
 
 
-def kablosuz_baglan():
-    # Su an devre disi (MOD_KABLOSUZ = False). Ileride buraya eslesme
-    # kodu / mDNS otomatik port bulma akisi eklenip MOD_KABLOSUZ = True
-    # yapilarak geri getirilebilir.
-    bilgi_goster("Kablosuz bağlantı şu anda kullanılamıyor.", "warning")
-    return None
-
-
 def kirpma_hesapla(genislik, yukseklik):
-    """Hedef 16:9 (yatay) ya da 9:16 (dikey) icin merkezden kirpma
-    degerlerini hesaplar. Cift sayiya yuvarlar."""
     if genislik >= yukseklik:
         if genislik / yukseklik > 16 / 9:
             h, w = yukseklik, int(yukseklik * 16 / 9)
@@ -145,9 +105,7 @@ def kirpma_hesapla(genislik, yukseklik):
 
 
 def ekran_orani_sor():
-    secim = tek_tik_secim(
-        "Görüntü tahtada nasıl gösterilsin?",
-        "Tabletin Kendi Oranı", "Tahtaya Tam Sığdır")
+    secim = tek_tik_secim("Görüntü tahtada nasıl gösterilsin?", "Tabletin Kendi Oranı", "Tahtaya Tam Sığdır")
     if secim is None:
         return None
     return secim == "Tahtaya Tam Sığdır"
@@ -163,32 +121,22 @@ def scrcpy_baslat(serial, tam_sigdir):
             w, h, x, y = kirpma_hesapla(genislik, yukseklik)
             crop_param = ["--crop", f"{w}:{h}:{x}:{y}"]
         else:
-            bilgi_goster("Çözünürlük okunamadı, kırpma uygulanmadan devam ediliyor.",
-                          "warning")
+            bilgi_goster("Çözünürlük okunamadı, kırpma uygulanmadan devam ediliyor.", "warning")
 
-    subprocess.run([
-        "scrcpy", "-s", serial,
-        "--max-size", MAX_SIZE,
-        "--video-bit-rate", VIDEO_BITRATE,
-        "--max-fps", MAX_FPS,
-        "-f", *crop_param,
-    ])
+    subprocess.run(["scrcpy", "-s", serial, "--max-size", MAX_SIZE, "--video-bit-rate", VIDEO_BITRATE,
+                     "--max-fps", MAX_FPS, "-f", *crop_param])
 
 
 def main():
     subprocess.run(["adb", "disconnect"], capture_output=True)
 
-    serial = None
-    if MOD_KABLOLU:
-        serial = kablolu_baglan()
-    if serial is None and MOD_KABLOSUZ:
-        serial = kablosuz_baglan()
+    serial = kablolu_baglan()
     if serial is None:
         return
 
     tam_sigdir = ekran_orani_sor()
     if tam_sigdir is None:
-        return  # kullanici pencereyi kapatti / vazgecti
+        return
 
     scrcpy_baslat(serial, tam_sigdir)
 
