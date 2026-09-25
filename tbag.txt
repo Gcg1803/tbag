@@ -101,18 +101,27 @@ fi
 # ---------------------------------------------------------------
 # Bu asamada cihaz baglantisi hazir oldugundan kullanici kabloyu cikarabilir.
 
-ZENITY_KOMUT="DISPLAY=$DISPLAY XAUTHORITY=$XAUTHORITY zenity --info \
-    --title='$UYGULAMA_ADI' \
-    --text='Tablet başarıyla bağlandı!\n\nKabloyu çıkarabilirsiniz.\nLütfen ekran görüntü oranını seçin:' \
-    --ok-label='Tabletin Kendi Oranı' \
-    --extra-button='Tahtada Tam Ekran (Kırpılır)' \
-    --width=420 --height=180"
+METIN="Tablet başarıyla bağlandı!
+
+Kabloyu çıkarabilirsiniz.
+Lütfen ekran görüntü oranını seçin:"
 
 if [ -n "${GRAFIK_KULLANICI:-}" ]; then
-    ZENITY_OUT="$(su - "$GRAFIK_KULLANICI" -c "$ZENITY_KOMUT" 2>/dev/null)"
+    ZENITY_OUT="$(su - "$GRAFIK_KULLANICI" -c \
+        "DISPLAY=$DISPLAY XAUTHORITY=$XAUTHORITY zenity --info \
+        --title='$UYGULAMA_ADI' \
+        --text='$METIN' \
+        --ok-label='Tabletin Kendi Oranı' \
+        --extra-button='Tahtada Tam Ekran (Kırpılır)' \
+        --width=420 --height=180" 2>/dev/null)"
     ZENITY_EXIT=$?
 else
-    ZENITY_OUT="$(eval "$ZENITY_KOMUT" 2>/dev/null)"
+    ZENITY_OUT="$(zenity --info \
+        --title="$UYGULAMA_ADI" \
+        --text="$METIN" \
+        --ok-label="Tabletin Kendi Oranı" \
+        --extra-button="Tahtada Tam Ekran (Kırpılır)" \
+        --width=420 --height=180 2>/dev/null)"
     ZENITY_EXIT=$?
 fi
 
