@@ -10,6 +10,7 @@ set -u
 # Tek bir oturumun calisip calismadigini kontrol et (flock)
 LOCK="/tmp/android-cihaz-baglama.lock"
 exec 200>"$LOCK"
+chmod 0666 "$LOCK"
 flock -n 200 || exit 0
 
 # scrcpy zaten aciksa tekrar tetikleme yapma
