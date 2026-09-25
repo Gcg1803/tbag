@@ -1,260 +1,143 @@
 #!/bin/bash
 # =====================================================================
-#  TBAG - Tablet Baglama Araci  (GitHub'dan calisan surum)
-#  Pardus akilli tahtalara adb/scrcpy ile tablet baglamak icin.
+#  Android Cihaz Bağlama Araç Kutusu
+#  Kablolu baglantiyi otomatik algilar, TCP/IP moduna alip baglanir,
+#  ardindan grafik arayuz ile ekran oranini sorup scrcpy baslatir.
 # =====================================================================
 
 set -u
 
-renk()  { printf "\n\033[1;36m==> %s\033[0m\n" "$1"; }
-ok()    { printf "\033[1;32m  [OK] %s\033[0m\n" "$1"; }
-uyari() { printf "\033[1;33m  [!]  %s\033[0m\n" "$1"; }
-hata()  { printf "\033[1;31m  [HATA] %s\033[0m\n" "$1"; }
+# Tek bir oturumun calisip calismadigini kontrol et (flock)
+LOCK="/tmp/android-cihaz-baglama.lock"
+exec 200>"$LOCK"
+flock -n 200 || exit 0
 
-
-# ---------------------------------------------------------------
-# 0) GEREKLI KOMUTLAR VAR MI
-# ---------------------------------------------------------------
-if ! command -v adb >/dev/null 2>&1; then
-    hata "adb bulunamadi. Once kurulum scriptini calistirdiginizdan emin olun."
-    exit 1
-fi
-if ! command -v scrcpy >/dev/null 2>&1; then
-    hata "scrcpy bulunamadi. Once kurulum scriptini calistirdiginizdan emin olun."
-    exit 1
-fi
+# scrcpy zaten aciksa tekrar tetikleme yapma
+pgrep -x scrcpy >/dev/null 2>&1 && exit 0
 
 # ---------------------------------------------------------------
-# IP formatini basitce dogrula
+# Active X/Grafik Oturumunu Tespiti (Udev veya Arka Plan Tetiklemeleri Icin)
 # ---------------------------------------------------------------
-ip_dogrula() {
-    local ip="$1"
-    if [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
-        return 0
+if [ -z "${DISPLAY:-}" ]; then
+    GRAFIK_KULLANICI="$(who | awk '/\(:0(\.0)?\)|:0$/ {print $1; exit}')"
+    if [ -z "$GRAFIK_KULLANICI" ]; then
+        GRAFIK_KULLANICI="$(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $3; exit}')"
     fi
-    return 1
-}
-port_dogrula() {
-    local p="$1"
-    if [[ "$p" =~ ^[0-9]{2,5}$ ]] && [ "$p" -ge 1 ] && [ "$p" -le 65535 ]; then
-        return 0
+    
+    if [ -n "$GRAFIK_KULLANICI" ]; then
+        export DISPLAY=":0"
+        export XAUTHORITY="/home/${GRAFIK_KULLANICI}/.Xauthority"
     fi
-    return 1
-}
+fi
 
-oku_ip() {
-    local prompt="$1" ip=""
-    while true; do
-        read -r -p "$prompt" ip
-        if ip_dogrula "$ip"; then
-            echo "$ip"
-            return 0
-        fi
-        uyari "Gecersiz IP adresi, tekrar deneyin. (Ornek: 192.168.1.25)" >&2
-    done
-}
-oku_port() {
-    local prompt="$1" p=""
-    while true; do
-        read -r -p "$prompt" p
-        if port_dogrula "$p"; then
-            echo "$p"
-            return 0
-        fi
-        uyari "Gecersiz port, tekrar deneyin. (Ornek: 5555)" >&2
-    done
+UYGULAMA_ADI="Android Cihaz Bağlama"
+
+zenity_mesaj() {
+    local tur="$1" metin="$2"
+    zenity --"$tur" --title="$UYGULAMA_ADI" --text="$metin" --width=350 2>/dev/null || true
 }
 
 # ---------------------------------------------------------------
-# 1) ONCEKI ADB BAGLANTILARINI TEMIZLE
+# 1) ADB VE USB CIHAZ KONTROLU
 # ---------------------------------------------------------------
-renk "Onceki adb baglantilari kapatiliyor"
+# Cihazin tam algilanmasi icin kisa bekleme
+sleep 2
+
 adb disconnect >/dev/null 2>&1
-ok "adb disconnect calistirildi"
 
-# ---------------------------------------------------------------
-# 2) BAGLANTI TURU SECIMI
-# ---------------------------------------------------------------
-renk "Baglanti turunu secin"
-echo "  1) Kablosuz (Wi-Fi - IP/port/eslesme kodu elle girilir)"
-echo "  2) Kablolu (USB tak - sistem otomatik baglar)"
-BAGLANTI_TURU=""
-while true; do
-    read -r -p "Seciminiz [1-2]: " BAGLANTI_TURU
-    case "$BAGLANTI_TURU" in
-        1|2) break ;;
-        *) uyari "Lutfen 1 veya 2 girin." ;;
-    esac
+USB_SERIAL=""
+for deneme in $(seq 1 15); do
+    USB_SERIAL="$(adb devices | awk '$2=="device" && $1 !~ /:/ {print $1; exit}')"
+    [ -n "$USB_SERIAL" ] && break
+    sleep 1
 done
 
-# ---------------------------------------------------------------
-# 3) EKRAN ORANI SECIMI
-# ---------------------------------------------------------------
-renk "Goruntu ekran oranini secin"
-echo "  1) Tabletin kendi ekran oranini koru"
-echo "  2) Tahtada tam ekran yap (Görüntü biraz kırpılır)"
-ORAN_SECIMI=""
-while true; do
-    read -r -p "Seciminiz [1-2]: " ORAN_SECIMI
-    case "$ORAN_SECIMI" in
-        1|2) break ;;
-        *) uyari "Lutfen 1 veya 2 girin." ;;
-    esac
-done
-
-# ---------------------------------------------------------------
-# 4) BAGLANTI BILGILERI VE ADB BAGLANTISI
-# ---------------------------------------------------------------
-SERIAL=""
-
-adb_baglan_dogrula() {
-    # $1 = serial (ip:port)
-    local s="$1" i durum
-    for i in 1 2 3 4 5; do
-        durum="$(adb devices | awk -v s="$s" '$1==s {print $2}')"
-        if [ "$durum" = "device" ]; then
-            return 0
-        fi
-        sleep 1
-    done
-    return 1
-}
-
-if [ "$BAGLANTI_TURU" = "2" ]; then
-    # ---- KABLOLU: USB tak, otomatik algila, IP'yi oku, TCP/IP moduna gec ----
-    renk "Kablolu baglanti - USB uzerinden otomatik algilama"
-    echo "  Tableti USB kablosu ile bu cihaza baglayin ve USB hata ayiklamayi"
-    echo "  tablette acilan pencereden onaylayin (Izin Ver / Bu bilgisayara guven)."
-
-    USB_SERIAL=""
-    UYARI_GOSTERILDI=0
-    printf "  Cihaz bekleniyor"
-    for deneme in $(seq 1 30); do
-        # Sadece USB seri numarali (ip:port formatinda OLMAYAN) ve
-        # "device" durumundaki cihazlari yakala.
-        USB_SERIAL="$(adb devices | awk '$2=="device" && $1 !~ /:/ {print $1; exit}')"
-        if [ -n "$USB_SERIAL" ]; then
-            echo
-            break
-        fi
-
-        if [ "$UYARI_GOSTERILDI" -eq 0 ]; then
-            UNAUTH="$(adb devices | awk '$2=="unauthorized" {print $1; exit}')"
-            if [ -n "$UNAUTH" ]; then
-                echo
-                uyari "Tablette USB hata ayiklama izni bekleniyor - ekrandaki onay penceresini kabul edin."
-                UYARI_GOSTERILDI=1
-            fi
-        fi
-        printf "."
-        sleep 1
-    done
-
-    if [ -z "$USB_SERIAL" ]; then
-        echo
-        hata "USB uzerinden cihaz bulunamadi. Kabloyu kontrol edin ve USB hata ayiklamanin acik oldugundan emin olun."
-        exit 1
-    fi
-    ok "USB uzerinden cihaz algilandi: $USB_SERIAL"
-
-    # ---- Tabletin kendi Wi-Fi IP adresini otomatik oku ----
-    TCPIP_PORT=5555
-    IP="$(adb -s "$USB_SERIAL" shell ip route show dev wlan0 2>/dev/null \
-            | grep -oE 'src [0-9]{1,3}(\.[0-9]{1,3}){3}' | awk '{print $2}' | head -n1)"
-
-    if [ -z "$IP" ]; then
-        IP="$(adb -s "$USB_SERIAL" shell ip -f inet addr show wlan0 2>/dev/null \
-                | grep -oE 'inet [0-9]{1,3}(\.[0-9]{1,3}){3}' | awk '{print $2}' | head -n1)"
-    fi
-
-    if [ -z "$IP" ] || ! ip_dogrula "$IP"; then
-        uyari "Tabletin Wi-Fi IP adresi otomatik okunamadi (Wi-Fi'a bagli oldugundan emin olun)."
-        IP=$(oku_ip "Tabletin IP adresini elle girin: ")
-    else
-        ok "Tabletin Wi-Fi IP adresi bulundu: $IP"
-    fi
-
-    echo "  Tablet kablosuz (TCP/IP) moduna aliniyor..."
-    adb -s "$USB_SERIAL" tcpip "$TCPIP_PORT" >/dev/null 2>&1
-    sleep 2
-
-    SERIAL="${IP}:${TCPIP_PORT}"
-    echo "  Baglaniliyor: adb connect $SERIAL"
-    BAGLANTI_CIKTI="$(adb connect "$SERIAL" 2>&1)"
-    echo "  $BAGLANTI_CIKTI"
-
-    if ! adb_baglan_dogrula "$SERIAL"; then
-        hata "Otomatik baglanti basarisiz oldu. Tabletin Wi-Fi'a bagli oldugunu ve ayni ag uzerinde oldugunuzu kontrol edin."
-        exit 1
-    fi
-    ok "Baglanti basarili: $SERIAL"
-    uyari "Artik USB kablosunu cikarabilirsiniz."
-
-else
-    # ---- KABLOSUZ: IP, pair port, pair code, sonra connect port ----
-    renk "Kablosuz eslesme (pairing) bilgileri"
-    echo "  (Tabletinizde Ayarlar > Gelistirici Secenekleri > Kablosuz Hata Ayiklama"
-    echo "   bolumunden 'Eslesme Kodu ile Eslestir' secenegini acin.)"
-    IP=$(oku_ip "Tabletin IP adresi: ")
-    PAIR_PORT=$(oku_port "Eslesme (pairing) portu: ")
-    read -r -p "Eslesme kodu (6 haneli): " PAIR_CODE
-
-    echo "  Eslesiliyor: adb pair $IP:$PAIR_PORT"
-    ESLESME_BASARILI=0
-    for deneme in 1 2 3; do
-        ESLESME_CIKTI="$(adb pair "${IP}:${PAIR_PORT}" "$PAIR_CODE" 2>&1)"
-        echo "  $ESLESME_CIKTI"
-        if echo "$ESLESME_CIKTI" | grep -qi "Successfully paired"; then
-            ESLESME_BASARILI=1
-            break
-        fi
-        uyari "Eslesme basarisiz oldu (deneme $deneme/3)."
-        if [ "$deneme" -lt 3 ]; then
-            read -r -p "Eslesme kodunu tekrar girin: " PAIR_CODE
-        fi
-    done
-
-    if [ "$ESLESME_BASARILI" -ne 1 ]; then
-        hata "Eslesme basarisiz. Eslesme portu/kodu dogru mu ve ayni ag uzerinde misiniz kontrol edin."
-        exit 1
-    fi
-    ok "Eslesme basarili"
-
-    CONNECT_PORT=$(oku_port "Baglanti (connect) portu: ")
-    SERIAL="${IP}:${CONNECT_PORT}"
-
-    echo "  Baglaniliyor: adb connect $SERIAL"
-    BAGLANTI_CIKTI="$(adb connect "$SERIAL" 2>&1)"
-    echo "  $BAGLANTI_CIKTI"
-
-    if ! adb_baglan_dogrula "$SERIAL"; then
-        hata "Cihaza baglanilamadi. Baglanti portunu kontrol edin."
-        exit 1
-    fi
-    ok "Baglanti basarili: $SERIAL"
+if [ -z "$USB_SERIAL" ]; then
+    # USB uzerinden bagli cihaz yoksa sessizce veya uyari ile cik
+    exit 0
 fi
 
 # ---------------------------------------------------------------
-# 5) EKRAN ORANI HESAPLAMASI (tam ekran secildiyse)
+# 2) IP TESPITI, TCP/IP MODUNA ALMA VE BAGLANMA (KABLO CIKARILABILIR HALE GELIR)
+# ---------------------------------------------------------------
+TCPIP_PORT=5555
+IP="$(adb -s "$USB_SERIAL" shell ip route show dev wlan0 2>/dev/null \
+        | grep -oE 'src [0-9]{1,3}(\.[0-9]{1,3}){3}' | awk '{print $2}' | head -n1)"
+
+if [ -z "$IP" ]; then
+    IP="$(adb -s "$USB_SERIAL" shell ip -f inet addr show wlan0 2>/dev/null \
+            | grep -oE 'inet [0-9]{1,3}(\.[0-9]{1,3}){3}' | awk '{print $2}' | head -n1)"
+fi
+
+if [ -z "$IP" ]; then
+    zenity_mesaj "error" "Tabletin Wi-Fi IP adresi okunamadı. Tabletin Wi-Fi ağında olduğundan emin olun."
+    exit 1
+fi
+
+# Cihazi TCP/IP moduna al ve IP uzerinden baglan
+adb -s "$USB_SERIAL" tcpip "$TCPIP_PORT" >/dev/null 2>&1
+sleep 2
+
+SERIAL="${IP}:${TCPIP_PORT}"
+adb connect "$SERIAL" >/dev/null 2>&1
+
+# Baglantinin kuruldugunu dogrula (5 sn kadar dene)
+BAGLANDI=0
+for i in 1 2 3 4 5; do
+    DURUM="$(adb devices | awk -v s="$SERIAL" '$1==s {print $2}')"
+    if [ "$DURUM" = "device" ]; then
+        BAGLANDI=1
+        break
+    fi
+    sleep 1
+done
+
+if [ "$BAGLANDI" -ne 1 ]; then
+    zenity_mesaj "error" "Kablosuz bağlantı kurulamadı ($SERIAL). Cihazın aynı ağda olduğundan emin olun."
+    exit 1
+fi
+
+# ---------------------------------------------------------------
+# 3) BAGLANTI KURULDUKTAN SONRA EKRAN ORANI SORUSU (ZENITY --INFO + 2 BUTON)
+# ---------------------------------------------------------------
+# Bu asamada cihaz baglantisi hazir oldugundan kullanici kabloyu cikarabilir.
+
+ZENITY_OUT=$(zenity --info \
+    --title="$UYGULAMA_ADI" \
+    --text="Tablet başarıyla bağlandı!\n\nKabloyu çıkarabilirsiniz.\nLütfen ekran görüntü oranını seçin:" \
+    --ok-label="Tabletin Kendi Oranı" \
+    --extra-button="Tahtada Tam Ekran (Kırpılır)" \
+    --width=420 --height=180 2>/dev/null)
+
+ZENITY_EXIT=$?
+
+ORAN_SECIMI=1
+
+if [ $ZENITY_EXIT -eq 0 ]; then
+    # Ok label ("Tabletin Kendi Oranı") secildi
+    ORAN_SECIMI=1
+elif [ "$ZENITY_OUT" = "Tahtada Tam Ekran (Kırpılır)" ]; then
+    # Ekstra buton secildi
+    ORAN_SECIMI=2
+else
+    # Pencere kapatildi / iptal edildi
+    exit 0
+fi
+
+# ---------------------------------------------------------------
+# 4) EKRAN ORANI HESAPLAMASI
 # ---------------------------------------------------------------
 CROP_PARAM=()
 
 if [ "$ORAN_SECIMI" = "2" ]; then
-    renk "Tablet ekran cozunurlugu okunuyor"
     SIZE_LINE="$(adb -s "$SERIAL" shell wm size 2>/dev/null | tail -n1)"
     RES="$(echo "$SIZE_LINE" | grep -oE '[0-9]+x[0-9]+')"
 
-    if [ -z "$RES" ]; then
-        uyari "Cozunurluk okunamadi, kirpma uygulanmadan devam edilecek."
-    else
+    if [ -n "$RES" ]; then
         WIDTH="${RES%x*}"
         HEIGHT="${RES#*x}"
-        echo "  Algilanan cozunurluk: ${WIDTH}x${HEIGHT}"
 
-        # Yatay mi dikey mi oldugunu belirle, hedef oranin
-        # hangi eksende kirpilmasi gerektigini hesapla.
         if [ "$WIDTH" -ge "$HEIGHT" ]; then
-            # Yatay tablet -> hedef 16:9
             ORAN_ASIM=$(awk -v w="$WIDTH" -v h="$HEIGHT" 'BEGIN{ print (w/h > 16/9) ? 1 : 0 }')
             if [ "$ORAN_ASIM" -eq 1 ]; then
                 TARGET_H="$HEIGHT"
@@ -270,7 +153,6 @@ if [ "$ORAN_SECIMI" = "2" ]; then
                 OFFSET_X=0
             fi
         else
-            # Dikey tablet -> hedef 9:16 (ayni oranin dikey karsiligi)
             ORAN_ASIM=$(awk -v w="$WIDTH" -v h="$HEIGHT" 'BEGIN{ print (h/w > 16/9) ? 1 : 0 }')
             if [ "$ORAN_ASIM" -eq 1 ]; then
                 TARGET_W="$WIDTH"
@@ -287,7 +169,6 @@ if [ "$ORAN_SECIMI" = "2" ]; then
             fi
         fi
 
-        # Cift sayiya yuvarla (video kodlayici uyumlulugu icin)
         TARGET_W=$(( TARGET_W - (TARGET_W % 2) ))
         TARGET_H=$(( TARGET_H - (TARGET_H % 2) ))
         OFFSET_X=$(( OFFSET_X - (OFFSET_X % 2) ))
@@ -295,25 +176,12 @@ if [ "$ORAN_SECIMI" = "2" ]; then
 
         CROP_VALUE="${TARGET_W}:${TARGET_H}:${OFFSET_X}:${OFFSET_Y}"
         CROP_PARAM=(--crop "$CROP_VALUE")
-        ok "Kirpma uygulanacak: $CROP_VALUE (kaynak: ${WIDTH}x${HEIGHT})"
     fi
-else
-    ok "Tabletin kendi ekran orani korunacak"
 fi
 
 # ---------------------------------------------------------------
-# 6) SCRCPY BASLAT
+# 5) SCRCPY BASLAT
 # ---------------------------------------------------------------
-renk "scrcpy baslatiliyor"
-echo "  Cikmak icin scrcpy penceresini kapatin veya Ctrl+C basin."
-sleep 1
-
-scrcpy -s "$SERIAL" --max-size 1280 --video-bit-rate 2M --max-fps 30 -f "${CROP_PARAM[@]}"
-SCRCPY_DURUM=$?
-
-if [ "$SCRCPY_DURUM" -ne 0 ]; then
-    hata "scrcpy kapatildi (kod: $SCRCPY_DURUM)."
-    exit "$SCRCPY_DURUM"
-fi
+scrcpy -s "$SERIAL" --max-size 1280 --video-bit-rate 2M --max-fps 30 -f "${CROP_PARAM[@]}" >/dev/null 2>&1
 
 exit 0
