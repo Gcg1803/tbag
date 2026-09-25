@@ -24,7 +24,7 @@ def bilgi_goster(mesaj, tur="info"):
 
 def tek_tik_secim(mesaj, secenek_1, secenek_2):
     sonuc = subprocess.run(
-        ["zenity", "--question", "--title", BASLIK, "--text", mesaj,
+        ["zenity", "--info", "--title", BASLIK, "--text", mesaj,
          "--extra-button", secenek_1, "--extra-button", secenek_2, "--cancel-label=Vazgeç"],
         capture_output=True, text=True)
     secim = sonuc.stdout.strip()
